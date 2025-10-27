@@ -24,10 +24,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run scraping script
-        run: python src/scraper/scrape_tmdb.py
+        run: python src/scraper/scrape_movie.py
 
       - name: Run cleaning script
-        run: python src/cleaning/clean_tmdb.py
+        run: python src/cleaning/clean_movie.py
 
       - name: Commit and push CSV
         uses: EndBug/add-and-commit@v9
