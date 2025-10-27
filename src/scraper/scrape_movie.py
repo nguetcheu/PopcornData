@@ -81,7 +81,7 @@ for page_num in range(1, 40):  # exemple: 10 pages
         movie_name = inner_div.find('h2').text.strip() if inner_div.find('h2') else "N/A"
         release_date = inner_div.find('p').text.strip() if inner_div.find('p') else "N/A"
         inner_link = inner_div.find('a')['href']
-        full_link = 'https://www.themoviedb.org' + inner_link
+        full_link = 'https://www.themoviedb.org' + inner_link + "?language=fr-FR"
 
         # page détail
         detail_resp = requests.get(full_link).text
