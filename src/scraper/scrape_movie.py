@@ -4,7 +4,6 @@ import pandas as pd
 from pathlib import Path
 import time
 import re
-from datetime import datetime
 
 # ===============================
 # 📁 CONFIGURATION ET CHEMINS
@@ -13,35 +12,10 @@ RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE = RAW_DIR / "all_movies_datas.json"
 
-TMDB_API_KEY = "6b99e30943b6075d408c1a836c07c94c"
-TMDB_BASE_URL = "https://api.themoviedb.org/3"
-
 all_movies = []
 
 # ===============================
-# 🧩 UTILITAIRES
-# ===============================
-def normalize_date(date_str):
-    """Normalise la date en format ISO (YYYY-MM-DD)"""
-    if not date_str or date_str == "N/A":
-        return "N/A"
-    try:
-        clean_date = re.sub(r"\s*\(.*?\)", "", date_str).strip()
-        if re.match(r"\d{2}/\d{2}/\d{4}", clean_date):
-            parsed = datetime.strptime(clean_date, "%d/%m/%Y")
-            return parsed.strftime("%Y-%m-%d")
-        elif re.match(r"\d{4}-\d{2}-\d{2}", clean_date):
-            return clean_date
-        return clean_date
-    except Exception:
-        return date_str
-
-def normalize_json_dates(df):
-    df["Release_date"] = df["Release_date"].apply(normalize_date)
-    return df
-
-# ===============================
-# 🎭 GENRES COMMUNS
+# 🎭 LISTE DES GENRES COMMUNS
 # ===============================
 COMMON_GENRES = {
     "Action": ["Action"],
@@ -65,165 +39,141 @@ COMMON_GENRES = {
     "Western": ["Western"]
 }
 
-def normalize_genres(genre_list):
-    if not genre_list:
+def normalize_genres(genre_str):
+    if not genre_str or genre_str == "N/A":
         return "N/A"
     normalized = set()
-    for genre in genre_list:
-        genre_clean = genre.strip()
+    for genre in genre_str.split(','):
+        genre_clean = genre.strip().capitalize()
         for common, variants in COMMON_GENRES.items():
-            if genre_clean in variants or genre_clean == common:
+            if genre_clean in variants:
                 normalized.add(common)
-                break
     return ', '.join(sorted(normalized)) if normalized else "N/A"
 
 # ===============================
-# 🔑 TMDb API - Récupération complète
+# 💰 PARSE MONEY & ROI
 # ===============================
-def get_tmdb_full_data(movie_id):
-    try:
-        api_url = f"{TMDB_BASE_URL}/movie/{movie_id}"
-        params = {
-            "api_key": TMDB_API_KEY,
-            "append_to_response": "credits,external_ids",
-            "language": "fr-FR"
-        }
-        
-        resp = requests.get(api_url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        # Si overview vide, réessayer en anglais
-        overview = data.get("overview", "")
-        if not overview.strip():
-            params_en = params.copy()
-            params_en["language"] = "en-US"
-            resp_en = requests.get(api_url, params=params_en, timeout=10)
-            if resp_en.status_code == 200:
-                overview = resp_en.json().get("overview", "N/A")
-        
-        # Top acteurs
-        actors_list = [a["name"] for a in data.get("credits", {}).get("cast", [])[:5]]
-        
-        # Réalisateur
-        crew = data.get("credits", {}).get("crew", [])
-        directors = [p["name"] for p in crew if p.get("job") == "Director"]
-        director = ", ".join(directors) if directors else "N/A"
-        
-        # Genres
-        genres = [g["name"] for g in data.get("genres", [])]
-        
-        # Runtime formaté
-        runtime = data.get("runtime")
-        if runtime:
-            h, m = divmod(runtime, 60)
-            runtime_formatted = f"{h}h {m}m" if h else f"{m}m"
-        else:
-            runtime_formatted = "N/A"
-
-        # Nettoyage de la date
-        release_date = normalize_date(data.get("release_date", "N/A"))
-
-        return {
-            "original_title": data.get("original_title", "N/A"),
-            "budget": data.get("budget") or 0,
-            "revenue": data.get("revenue") or 0,
-            "vote_count": data.get("vote_count", 0),
-            "vote_average": data.get("vote_average", 0),
-            "runtime": runtime_formatted,
-            "genres": genres,
-            "overview": overview if overview else "N/A",
-            "director": director,
-            "actors": actors_list,
-            "release_date": release_date,
-            "popularity": data.get("popularity", 0),
-            "imdb_id": data.get("external_ids", {}).get("imdb_id")
-        }
-    except Exception as e:
-        print(f"⚠️ TMDb API erreur pour movie_id {movie_id}: {e}")
-        return None
+def parse_money(value_str):
+    """Transforme $60,000,000.00 en int 60000000"""
+    if not value_str or "N/A" in value_str or "-" in value_str:
+        return 0
+    digits = ''.join(c for c in value_str if c.isdigit())
+    return int(digits) if digits else 0
 
 # ===============================
-# 🎬 Scraping TMDb HTML + API
+# 🎬 SCRAPING TMDb
 # ===============================
+print("📡 Scraping TMDb...")
+
 base_url = 'https://www.themoviedb.org/movie?page='
 
-for page in range(1, 40):  # ⇦ change ici pour plus de pages
-    print(f"📄 Scraping TMDb page {page}")
-    try:
-        resp = requests.get(base_url + str(page), timeout=10)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'lxml')
-        cards = soup.find_all('div', class_='card style_1')
+for page_num in range(1, 40):  # exemple: 10 pages
+    print(f"📄 Scraping page {page_num}...")
+    resp = requests.get(base_url + str(page_num)).text
+    soup = BeautifulSoup(resp, 'lxml')
+    all_div = soup.find_all('div', class_='card style_1')
 
-        for card in cards:
-            inner = card.find('div', class_='content')
-            if not inner:
-                continue
+    for item in all_div:
+        inner_div = item.find('div', class_='content')
+        if not inner_div:
+            continue
 
-            title_tag = inner.find('h2')
-            movie_name_fr = title_tag.text.strip() if title_tag else "N/A"
+        movie_name = inner_div.find('h2').text.strip() if inner_div.find('h2') else "N/A"
+        release_date = inner_div.find('p').text.strip() if inner_div.find('p') else "N/A"
+        inner_link = inner_div.find('a')['href']
+        full_link = 'https://www.themoviedb.org' + inner_link
 
-            inner_link_tag = inner.find('a')
-            if not inner_link_tag or 'href' not in inner_link_tag.attrs:
-                continue
-            full_link = "https://www.themoviedb.org" + inner_link_tag['href']
+        # page détail
+        detail_resp = requests.get(full_link).text
+        detail_soup = BeautifulSoup(detail_resp, 'lxml')
 
-            match = re.search(r'/movie/(\d+)', full_link)
-            if not match:
-                continue
-            movie_id = match.group(1)
+        # --- Original Title ---
+        original_title_tag = detail_soup.find('h2', class_='original_title')
+        if original_title_tag and original_title_tag.text.strip():
+            original_title = original_title_tag.text.strip()
+        else:
+            original_title = movie_name
 
-            print(f"  🎬 Traitement: {movie_name_fr} (ID: {movie_id})")
+        # --- Rating Numeric ---
+        rating_div = detail_soup.find('div', 'user_score_chart')
+        rating_numeric = float(rating_div["data-percent"]) if rating_div else "N/A"
 
-            tmdb_data = get_tmdb_full_data(movie_id)
-            if not tmdb_data:
-                print(f"    ⚠️ Données absentes, film ignoré.")
-                continue
+        # --- Genres ---
+        genre_spans = detail_soup.find_all('span', class_='genres')
+        genres_list = []
+        for g in genre_spans:
+            genres_list.extend([a.text.strip() for a in g.find_all('a')])
+        genres = normalize_genres(', '.join(genres_list))
 
-            # Calcul du ROI (si budget et revenue présents)
-            roi_value = None
-            if tmdb_data["budget"] > 0 and tmdb_data["revenue"] > 0:
-                roi_value = round((tmdb_data["revenue"] - tmdb_data["budget"]) / tmdb_data["budget"], 2)
+        # --- Run Time ---
+        run_time_tag = detail_soup.find('span', class_='runtime')
+        run_time = run_time_tag.text.strip() if run_time_tag else "N/A"
 
-            movie_data = {
-                "Movie_name": movie_name_fr,
-                "Original_Title": tmdb_data["original_title"],
-                "Release_date": tmdb_data["release_date"],
-                "Genre": normalize_genres(tmdb_data["genres"]),
-                "Run_time": tmdb_data["runtime"],
-                "Overview": tmdb_data["overview"],
-                "Director": tmdb_data["director"],
-                "Top_Actors": ", ".join(tmdb_data["actors"]) if tmdb_data["actors"] else "N/A",
-                "Budget": tmdb_data["budget"],
-                "Revenue": tmdb_data["revenue"],
-                "Rating_Numeric": tmdb_data["vote_average"],
-                "ROI": roi_value,
-                "Source": "TMDb HTML + API"
-            }
+        # --- Overview ---
+        overview_tag = detail_soup.find('div', class_='overview')
+        overview = overview_tag.find('p').text.strip() if overview_tag and overview_tag.find('p') else "N/A"
 
-            all_movies.append(movie_data)
-            time.sleep(0.3)
+        # --- Director ---
+        directors = []
+        people_list = detail_soup.find('ol', class_='people no_image')
+        if people_list:
+            first_li = people_list.find('li', class_='profile')
+            if first_li:
+                a_tag = first_li.find('a')
+                if a_tag:
+                    directors.append(a_tag.text.strip())
+        director = directors[0] if directors else "N/A"
 
-        time.sleep(1)
+        # --- Top Actors ---
+        top_actors = []
+        ol_actors = detail_soup.find('ol', class_='people scroller')
+        if ol_actors:
+            actor_lis = ol_actors.find_all('li', class_='card')
+            for li in actor_lis[:5]:  # Top 5
+                img_tag = li.find('img')
+                if img_tag and img_tag.get('alt'):
+                    top_actors.append(img_tag['alt'].strip())
+        top_actors_str = ', '.join(top_actors) if top_actors else "N/A"
 
-    except Exception as e:
-        print(f"❌ Erreur page {page}: {e}")
-        continue
+        # --- Budget & Revenue ---
+        facts_section = detail_soup.find('section', class_='facts left_column')
+        budget_tag = revenue_tag = None
+        if facts_section:
+            for p_tag in facts_section.find_all('p'):
+                strong_tag = p_tag.find('strong')
+                if strong_tag and 'Budget' in strong_tag.text:
+                    budget_tag = p_tag
+                if strong_tag and 'Recette' in strong_tag.text:
+                    revenue_tag = p_tag
+        budget = parse_money(budget_tag.text if budget_tag else "N/A")
+        revenue = parse_money(revenue_tag.text if revenue_tag else "N/A")
+        roi = round((revenue - budget) / budget, 2) if budget > 0 and revenue > 0 else None
+
+        # --- Dictionnaire final du film ---
+        movie_data = {
+            "Movie_name": movie_name,
+            "Original_Title": original_title,
+            "Release_date": release_date,
+            "Rating_Numeric": rating_numeric,
+            "Genre": genres,
+            "Run_time": run_time,
+            "Overview": overview,
+            "Director": director,
+            "Top_Actors": top_actors,
+            "Budget": budget,
+            "Revenue": revenue,
+            "ROI": roi,
+            "Source": "TMDb"
+        }
+
+        all_movies.append(movie_data)
+        time.sleep(0.3)
+
+    time.sleep(1)
 
 # ===============================
-# 💾 SAUVEGARDE
+# 💾 SAUVEGARDE FINALE
 # ===============================
-if all_movies:
-    df = pd.DataFrame(all_movies)
-    df = normalize_json_dates(df)
-
-    import json
-    OUT_FILE.write_text(json.dumps(json.loads(df.to_json(orient="records")), indent=2, ensure_ascii=False), encoding="utf-8")
-    csv_file = OUT_FILE.with_suffix('.csv')
-    df.to_csv(csv_file, index=False, encoding='utf-8-sig')
-
-    print(f"\n✅ {len(all_movies)} films sauvegardés dans {OUT_FILE}")
-    print(f"✅ CSV sauvegardé dans {csv_file}")
-else:
-    print("❌ Aucun film récupéré")
+df = pd.DataFrame(all_movies)
+df.to_json(OUT_FILE, orient='records', indent=2, force_ascii=False)
+print(f"✅ Total : {len(all_movies)} films sauvegardés dans : {OUT_FILE}")
