@@ -1,0 +1,40 @@
+name: TMDB Pipeline (PROJET LDF)
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  ## chaque lunid à 06:00 du matin
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraping script
+        run: python src/scraper/scrape_tmdb.py
+
+      - name: Run cleaning script
+        run: python src/cleaning/clean_tmdb.py
+
+      - name: Commit and push CSV
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: github-actions
+          author_email: github-actions@github.com
+          message: "🎬 Mise à jour automatique des données TMDB"
+          add: |
+            data/raw/all_movies_datas.json
+            data/movies_clean.csv
