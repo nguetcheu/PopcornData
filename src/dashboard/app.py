@@ -34,6 +34,36 @@ def load_data():
 df = load_data()
 
 # ===============================
+# 📦 Sidebar structurée et contrôles globaux
+# ===============================
+st.sidebar.title("🎛️ Panneau de configuration")
+st.sidebar.markdown("Filtrez et explorez les films selon vos préférences.")
+
+# Slider : nombre de films à charger
+max_films = len(df)
+nb_films = st.sidebar.slider(
+    "🎬 Nombre de films à charger :",
+    min_value=50,
+    max_value=max_films,
+    step=50,
+    value=min(500, max_films)
+)
+df = df.head(nb_films)
+
+# Bouton reset (rafraîchissement)
+if st.sidebar.button("♻️ Réinitialiser les filtres"):
+    st.rerun()
+
+st.sidebar.divider()
+
+# 🔍 Moteur de recherche
+st.sidebar.subheader("🔎 Rechercher un film")
+search_query = st.sidebar.text_input("Nom du film (ex : Avenger)")
+if search_query:
+    df = df[df["Movie_name"].str.contains(search_query, case=False, na=False)]
+    st.sidebar.success(f"{len(df)} film(s) trouvé(s) correspondant à '{search_query}'")
+
+# ===============================
 # 🎭 Filtres dynamiques
 # ===============================
 col1, col2, col3 = st.columns(3)
@@ -132,114 +162,146 @@ else:
     st.info("Pas assez de données récentes pour calculer les tendances sur les 5 dernières années.")
 
 # ===============================
+# 🎯 Recommandation de films similaires
+# ===============================
+st.subheader("🎯 Recommandation de films similaires")
+
+if not filtered_df.empty:
+    selected_movie = st.selectbox("Choisissez un film pour obtenir des recommandations :", filtered_df["Movie_name"].unique())
+    
+    def recommend_movies(title, df, n=5):
+        try:
+            genres = df[df['Movie_name'] == title]['Genre'].iloc[0].split(',')
+            mask = df['Genre'].apply(lambda g: any(genre.strip() in g for genre in genres))
+            recos = df[mask & (df["Movie_name"] != title)].sort_values(by="Rating", ascending=False).head(n)
+            return recos[["Movie_name", "Genre", "Rating", "Release_year"]]
+        except Exception:
+            return pd.DataFrame()
+    
+    recos = recommend_movies(selected_movie, df)
+    if not recos.empty:
+        st.write(f"🎬 Films similaires à **{selected_movie}** :")
+        st.dataframe(recos, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucune recommandation disponible pour ce film.")
+else:
+    st.info("Veuillez sélectionner un film pour voir les recommandations.")
+
+# ===============================
 # 🧾 Aperçu des données filtrées
 # ===============================
 with st.expander("🔍 Aperçu du jeu de données filtré"):
     st.dataframe(filtered_df.head(15), use_container_width=True, hide_index=True)
-
+# ===============================
+# 🎯 Affichage conditionnel selon le nombre de films
+# ===============================
+if len(filtered_df) > 1:
 # ===============================
 # ===============================
 # 📊 Répartition par type de diffusion
 # ===============================
-st.subheader("📊 Répartition par type de diffusion")
+    st.subheader("📊 Répartition par type de diffusion")
 
-# Création d'une colonne pour le type de diffusion
-def diffusion_type(row):
-    if pd.notna(row["Budget"]) or pd.notna(row["Revenue"]):
-        return "Cinéma"
-    else:
-        return "Streaming"
+    # Création d'une colonne pour le type de diffusion
+    def diffusion_type(row):
+        if pd.notna(row["Budget"]) or pd.notna(row["Revenue"]):
+            return "Cinéma"
+        else:
+            return "Streaming"
 
-filtered_df["Diffusion"] = filtered_df.apply(diffusion_type, axis=1)
+    filtered_df["Diffusion"] = filtered_df.apply(diffusion_type, axis=1)
 
-diff_counts = filtered_df["Diffusion"].value_counts().reset_index()
-diff_counts.columns = ["Type de diffusion", "Nombre"]
+    diff_counts = filtered_df["Diffusion"].value_counts().reset_index()
+    diff_counts.columns = ["Type de diffusion", "Nombre"]
 
-fig_diff = px.pie(
-    diff_counts,
-    values="Nombre",
-    names="Type de diffusion",
-    hole=0.4,
-    color_discrete_sequence=px.colors.qualitative.Set2
-)
-st.plotly_chart(fig_diff, use_container_width=True)
+    fig_diff = px.pie(
+        diff_counts,
+        values="Nombre",
+        names="Type de diffusion",
+        hole=0.4,
+        color_discrete_sequence=px.colors.qualitative.Set2
+    )
+    st.plotly_chart(fig_diff, use_container_width=True)
 
-# ===============================
-# 📈 Évolution des notes dans le temps
-# ===============================
-st.subheader("📈 Note moyenne par année de sortie")
-yearly = filtered_df.groupby("Release_year")["Rating"].mean().reset_index()
-fig2 = px.line(yearly, x="Release_year", y="Rating", markers=True, labels={"Release_year":"Année","Rating":"Note moyenne (/10)"}, color_discrete_sequence=px.colors.qualitative.Bold)
-fig2.update_layout(xaxis=dict(dtick=1))
-st.plotly_chart(fig2, use_container_width=True)
+    # ===============================
+    # 📈 Évolution des notes dans le temps
+    # ===============================
+    st.subheader("📈 Note moyenne par année de sortie")
+    yearly = filtered_df.groupby("Release_year")["Rating"].mean().reset_index()
+    fig2 = px.line(yearly, x="Release_year", y="Rating", markers=True, labels={"Release_year":"Année","Rating":"Note moyenne (/10)"}, color_discrete_sequence=px.colors.qualitative.Bold)
+    fig2.update_layout(xaxis=dict(dtick=1))
+    st.plotly_chart(fig2, use_container_width=True)
 
-# ===============================
-# 🎭 Top 10 Genres
-# ===============================
-st.subheader("🎭 Top 10 Genres (note moyenne)")
-genre_ratings = (
-    filtered_df.assign(Genre=filtered_df["Genre"].str.split(","))
-    .explode("Genre")
-    .groupby("Genre")["Rating"]
-    .mean()
-    .sort_values(ascending=False)
-    .head(10)
-    .reset_index()
-)
-fig3 = px.bar(genre_ratings, x="Genre", y="Rating", color="Rating", color_continuous_scale="Blues", labels={"Rating":"Note moyenne (/10)","Genre":"Genre"})
-fig3.update_xaxes(tickangle=45)
-st.plotly_chart(fig3, use_container_width=True)
-
-# ===============================
-# 🏆 Top 10 Films
-# ===============================
-st.subheader("🏆 Top 10 Films selon le filtre")
-cols_to_show = ["Movie_name","Release_year","Genre","Director","Rating","Rating_category","Source"]
-cols_to_show = [c for c in cols_to_show if c in filtered_df.columns]
-top_movies = filtered_df.nlargest(10, "Rating")[cols_to_show]
-st.dataframe(top_movies, use_container_width=True, hide_index=True)
-
-# ===============================
-# 🎬 Réalisateurs et acteurs les plus rentables
-# ===============================
-st.subheader("🏆 Réalisateurs et Acteurs les plus rentables")
-
-# 🔹 Top réalisateurs par profit moyen
-if "Director" in filtered_df.columns and "Profit" in filtered_df.columns:
-    director_profit = (
-        filtered_df.dropna(subset=["Director", "Profit"])
-        .groupby("Director")["Profit"]
-        .agg(['mean', 'median', 'count'])
-        .sort_values(by='mean', ascending=False)
+    # ===============================
+    # 🎭 Top 10 Genres
+    # ===============================
+    st.subheader("🎭 Top 10 Genres (note moyenne)")
+    genre_ratings = (
+        filtered_df.assign(Genre=filtered_df["Genre"].str.split(","))
+        .explode("Genre")
+        .groupby("Genre")["Rating"]
+        .mean()
+        .sort_values(ascending=False)
         .head(10)
         .reset_index()
     )
-    st.markdown("**🎬 Top 10 Réalisateurs par profit moyen**")
-    st.dataframe(director_profit.style.format({
-        'mean': '{:,.0f}',
-        'median': '{:,.0f}',
-        'count': '{:d}'
-    }), use_container_width=True)
+    fig3 = px.bar(genre_ratings, x="Genre", y="Rating", color="Rating", color_continuous_scale="Blues", labels={"Rating":"Note moyenne (/10)","Genre":"Genre"})
+    fig3.update_xaxes(tickangle=45)
+    st.plotly_chart(fig3, use_container_width=True)
 
-# 🔹 Top acteurs par profit moyen
-if "Top_Actors" in filtered_df.columns and "Profit" in filtered_df.columns:
-    actors_df = (
-        filtered_df.dropna(subset=["Top_Actors", "Profit"])
-        .assign(Actor=filtered_df["Top_Actors"].str.split(","))
-        .explode("Actor")
-    )
-    actors_df["Actor"] = actors_df["Actor"].str.strip()
-    actor_profit = (
-        actors_df.groupby("Actor")["Profit"]
-        .agg(['mean', 'median', 'count'])
-        .sort_values(by='mean', ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    st.markdown("**⭐ Top 10 Acteurs par profit moyen**")
-    st.dataframe(actor_profit.style.format({
-        'mean': '{:,.0f}',
-        'median': '{:,.0f}',
-        'count': '{:d}'
-    }), use_container_width=True)
+    # ===============================
+    # 🏆 Top 10 Films
+    # ===============================
+    st.subheader("🏆 Top 10 Films selon le filtre")
+    cols_to_show = ["Movie_name","Release_year","Genre","Director","Rating","Rating_category","Source"]
+    cols_to_show = [c for c in cols_to_show if c in filtered_df.columns]
+    top_movies = filtered_df.nlargest(10, "Rating")[cols_to_show]
+    st.dataframe(top_movies, use_container_width=True, hide_index=True)
+    
+else:
+    st.info("🔍 Un seul film trouvé : les visualisations globales sont masquées.")
+    
+    # ===============================
+    # 🎬 Réalisateurs et acteurs les plus rentables
+    # ===============================
+    st.subheader("🏆 Réalisateurs et Acteurs les plus rentables")
+
+    # 🔹 Top réalisateurs par profit moyen
+    if "Director" in filtered_df.columns and "Profit" in filtered_df.columns:
+        director_profit = (
+            filtered_df.dropna(subset=["Director", "Profit"])
+            .groupby("Director")["Profit"]
+            .agg(['mean', 'median', 'count'])
+            .sort_values(by='mean', ascending=False)
+            .head(10)
+            .reset_index()
+        )
+        st.markdown("**🎬 Top 10 Réalisateurs par profit moyen**")
+        st.dataframe(director_profit.style.format({
+            'mean': '{:,.0f}',
+            'median': '{:,.0f}',
+            'count': '{:d}'
+        }), use_container_width=True)
+
+    # 🔹 Top acteurs par profit moyen
+    if "Top_Actors" in filtered_df.columns and "Profit" in filtered_df.columns:
+        actors_df = (
+            filtered_df.dropna(subset=["Top_Actors", "Profit"])
+            .assign(Actor=filtered_df["Top_Actors"].str.split(","))
+            .explode("Actor")
+        )
+        actors_df["Actor"] = actors_df["Actor"].str.strip()
+        actor_profit = (
+            actors_df.groupby("Actor")["Profit"]
+            .agg(['mean', 'median', 'count'])
+            .sort_values(by='mean', ascending=False)
+            .head(10)
+            .reset_index()
+        )
+        st.markdown("**⭐ Top 10 Acteurs par profit moyen**")
+        st.dataframe(actor_profit.style.format({
+            'mean': '{:,.0f}',
+            'median': '{:,.0f}',
+            'count': '{:d}'
+        }), use_container_width=True)
 
