@@ -46,7 +46,7 @@ nb_films = st.sidebar.slider(
     min_value=50,
     max_value=max_films,
     step=50,
-    value=min(500, max_films)
+    value=min(770, max_films)
 )
 df = df.head(nb_films)
 
