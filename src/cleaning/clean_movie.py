@@ -108,6 +108,12 @@ def clean_movie_data(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df['Original_Title'] = df['Movie_name']
 
+    # ✅ Nouveau : Nettoyage de Poster_URL
+    if 'Poster_URL' in df.columns:
+        df['Poster_URL'] = df['Poster_URL'].apply(clean_text)
+    else:
+        df['Poster_URL'] = "N/A"
+
     # Extraction de l'année
     df['Release_year'] = df['Release_date'].apply(extract_year)
 
@@ -174,7 +180,7 @@ def clean_movie_data(df: pd.DataFrame) -> pd.DataFrame:
         'Movie_name', 'Original_Title', 'Release_date', 'Release_year', 'Release_decade',
         'Genre', 'Runtime_minutes', 'Director', 'Top_Actors', 'Actor_count', 'Overview',
         'Budget', 'Budget_category', 'Revenue', 'Profit', 'ROI', 'Is_profitable',
-        'Rating', 'Rating_category', 'Source'
+        'Rating', 'Rating_category', 'Poster_URL', 'Source'  
     ]
     available_columns = [col for col in columns_order if col in df.columns]
     df = df[available_columns]
@@ -220,7 +226,8 @@ def display_statistics(df: pd.DataFrame):
         print(f"\n🎬 Top 5 genres:")
         for genre, count in top_genres:
             print(f"   - {genre}: {count} films")
-        # Données manquantes
+
+    # Données manquantes
     print(f"\n❓ Données manquantes:")
     for col in df.columns:
         missing = df[col].isna().sum()

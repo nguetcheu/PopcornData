@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 import time
 import re
+import json  
 
 # ===============================
 # 📁 CONFIGURATION ET CHEMINS
@@ -67,7 +68,7 @@ print("📡 Scraping TMDb...")
 
 base_url = 'https://www.themoviedb.org/movie?page='
 
-for page_num in range(1, 40):  # exemple: 10 pages
+for page_num in range(1, 40):  # exemple: 40 pages
     print(f"📄 Scraping page {page_num}...")
     resp = requests.get(base_url + str(page_num)).text
     soup = BeautifulSoup(resp, 'lxml')
@@ -83,7 +84,15 @@ for page_num in range(1, 40):  # exemple: 10 pages
         inner_link = inner_div.find('a')['href']
         full_link = 'https://www.themoviedb.org' + inner_link + "?language=fr-FR"
 
-        # page détail
+        # --- Image du film (poster) ---
+        img_tag = item.find('img')
+        if img_tag and img_tag.get('src'):
+            # ✅ Correction ici : nettoie les URL pour éviter les \/
+            poster_url = img_tag['src'].replace("\\/", "/").strip()
+        else:
+            poster_url = "N/A"
+
+        # --- Page détail ---
         detail_resp = requests.get(full_link).text
         detail_soup = BeautifulSoup(detail_resp, 'lxml')
 
@@ -143,7 +152,7 @@ for page_num in range(1, 40):  # exemple: 10 pages
                 strong_tag = p_tag.find('strong')
                 if strong_tag and 'Budget' in strong_tag.text:
                     budget_tag = p_tag
-                if strong_tag and 'Recette' in strong_tag.text:
+                if strong_tag and ('Recette' in strong_tag.text or 'Revenue' in strong_tag.text):
                     revenue_tag = p_tag
         budget = parse_money(budget_tag.text if budget_tag else "N/A")
         revenue = parse_money(revenue_tag.text if revenue_tag else "N/A")
@@ -159,10 +168,11 @@ for page_num in range(1, 40):  # exemple: 10 pages
             "Run_time": run_time,
             "Overview": overview,
             "Director": director,
-            "Top_Actors": top_actors,
+            "Top_Actors": top_actors_str,
             "Budget": budget,
             "Revenue": revenue,
             "ROI": roi,
+            "Poster_URL": poster_url,
             "Source": "TMDb"
         }
 
@@ -175,5 +185,11 @@ for page_num in range(1, 40):  # exemple: 10 pages
 # 💾 SAUVEGARDE FINALE
 # ===============================
 df = pd.DataFrame(all_movies)
-df.to_json(OUT_FILE, orient='records', indent=2, force_ascii=False)
+
+# ✅ Écriture JSON propre sans \/
+OUT_FILE.write_text(
+    json.dumps(json.loads(df.to_json(orient="records")), indent=2, ensure_ascii=False),
+    encoding="utf-8"
+)
+
 print(f"✅ Total : {len(all_movies)} films sauvegardés dans : {OUT_FILE}")
